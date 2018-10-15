@@ -30,11 +30,6 @@
 @class CDVInAppBrowserViewController;
 
 @interface CDVInAppBrowser : CDVPlugin {
-    UIWindow * tmpWindow;
-
-    @private
-    BOOL _useBeforeload;
-    BOOL _waitForBeforeload;
 }
 
 @property (nonatomic, retain) CDVInAppBrowserViewController* inAppBrowserViewController;
@@ -46,7 +41,6 @@
 - (void)injectScriptCode:(CDVInvokedUrlCommand*)command;
 - (void)show:(CDVInvokedUrlCommand*)command;
 - (void)hide:(CDVInvokedUrlCommand*)command;
-- (void)loadAfterBeforeload:(CDVInvokedUrlCommand*)command;
 
 @end
 
@@ -64,6 +58,7 @@
 @property (nonatomic, assign) BOOL clearcache;
 @property (nonatomic, assign) BOOL clearsessioncache;
 @property (nonatomic, assign) BOOL hidespinner;
+@property (nonatomic, assign) NSString* custom;
 
 @property (nonatomic, copy) NSString* presentationstyle;
 @property (nonatomic, copy) NSString* transitionstyle;
@@ -75,7 +70,6 @@
 @property (nonatomic, assign) BOOL suppressesincrementalrendering;
 @property (nonatomic, assign) BOOL hidden;
 @property (nonatomic, assign) BOOL disallowoverscroll;
-@property (nonatomic, assign) BOOL beforeload;
 
 + (CDVInAppBrowserOptions*)parseOptions:(NSString*)options;
 
@@ -103,6 +97,9 @@
 @property (nonatomic, strong) IBOutlet UIBarButtonItem* forwardButton;
 @property (nonatomic, strong) IBOutlet UIActivityIndicatorView* spinner;
 @property (nonatomic, strong) IBOutlet UIToolbar* toolbar;
+
+@property(nonatomic, strong) IBOutlet UIToolbar *header;
+@property(nonatomic, strong) IBOutlet UITabBar *tabBar;
 
 @property (nonatomic, weak) id <CDVScreenOrientationDelegate> orientationDelegate;
 @property (nonatomic, weak) CDVInAppBrowser* navigationDelegate;

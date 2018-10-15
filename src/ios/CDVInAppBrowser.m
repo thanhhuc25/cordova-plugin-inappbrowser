@@ -29,9 +29,13 @@
 #define    kInAppBrowserToolbarBarPositionTop @"top"
 
 #define    TOOLBAR_HEIGHT 44.0
+//#define    TOOLBAR_HEIGHT 49.0
 #define    STATUSBAR_HEIGHT 20.0
 #define    LOCATIONBAR_HEIGHT 21.0
+//#define    LOCATIONBAR_HEIGHT 0.0
 #define    FOOTER_HEIGHT ((TOOLBAR_HEIGHT) + (LOCATIONBAR_HEIGHT))
+// header
+#define    HEADER_HEIGHT 60
 
 #pragma mark CDVInAppBrowser
 
@@ -46,8 +50,6 @@
 {
     _previousStatusBarStyle = -1;
     _callbackIdPattern = nil;
-    _useBeforeload = NO;
-    _waitForBeforeload = NO;
 }
 
 - (id)settingForKey:(NSString*)key
@@ -211,10 +213,6 @@
         self.inAppBrowserViewController.webView.suppressesIncrementalRendering = browserOptions.suppressesincrementalrendering;
     }
 
-    // use of beforeload event
-    _useBeforeload = browserOptions.beforeload;
-    _waitForBeforeload = browserOptions.beforeload;
-
     [self.inAppBrowserViewController navigateTo:url];
     if (!browserOptions.hidden) {
         [self show:nil];
@@ -245,14 +243,11 @@
     // Run later to avoid the "took a long time" log message.
     dispatch_async(dispatch_get_main_queue(), ^{
         if (weakSelf.inAppBrowserViewController != nil) {
-            if (!tmpWindow) {
-                CGRect frame = [[UIScreen mainScreen] bounds];
-                tmpWindow = [[UIWindow alloc] initWithFrame:frame];
-            }
+            CGRect frame = [[UIScreen mainScreen] bounds];
+            UIWindow *tmpWindow = [[UIWindow alloc] initWithFrame:frame];
             UIViewController *tmpController = [[UIViewController alloc] init];
-            double baseWindowLevel = [UIApplication sharedApplication].keyWindow.windowLevel;
             [tmpWindow setRootViewController:tmpController];
-            [tmpWindow setWindowLevel:baseWindowLevel+1];
+            [tmpWindow setWindowLevel:UIWindowLevelNormal];
 
             [tmpWindow makeKeyAndVisible];
             [tmpController presentViewController:nav animated:YES completion:nil];
@@ -279,9 +274,7 @@
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.inAppBrowserViewController != nil) {
             _previousStatusBarStyle = -1;
-            [self.inAppBrowserViewController.presentingViewController dismissViewControllerAnimated:YES completion:^{
-                [[[[UIApplication sharedApplication] delegate] window] makeKeyAndVisible];
-          }];
+            [self.inAppBrowserViewController.presentingViewController dismissViewControllerAnimated:YES completion:nil];
         }
     });
 }
@@ -305,30 +298,8 @@
 
 - (void)openInSystem:(NSURL*)url
 {
-    if ([[UIApplication sharedApplication] openURL:url] == NO) {
-        [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPluginHandleOpenURLNotification object:url]];
-    }
-}
-
-- (void)loadAfterBeforeload:(CDVInvokedUrlCommand*)command
-{
-    NSString* urlStr = [command argumentAtIndex:0];
-
-    if (!_useBeforeload) {
-        NSLog(@"unexpected loadAfterBeforeload called without feature beforeload=yes");
-    }
-    if (self.inAppBrowserViewController == nil) {
-        NSLog(@"Tried to invoke loadAfterBeforeload on IAB after it was closed.");
-        return;
-    }
-    if (urlStr == nil) {
-        NSLog(@"loadAfterBeforeload called with nil argument, ignoring.");
-        return;
-    }
-
-    NSURL* url = [NSURL URLWithString:urlStr];
-    _waitForBeforeload = NO;
-    [self.inAppBrowserViewController navigateTo:url];
+    [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPluginHandleOpenURLNotification object:url]];
+    [[UIApplication sharedApplication] openURL:url];
 }
 
 // This is a helper method for the inject{Script|Style}{Code|File} API calls, which
@@ -440,7 +411,6 @@
 {
     NSURL* url = request.URL;
     BOOL isTopLevelNavigation = [request.URL isEqual:[request mainDocumentURL]];
-    BOOL shouldStart = YES;
 
     // See if the url uses the 'gap-iab' protocol. If so, the host should be the id of a callback to execute,
     // and the path, if present, should be a JSON-encoded value to pass to the callback.
@@ -468,22 +438,11 @@
             return NO;
         }
     }
-
-    // When beforeload=yes, on first URL change, initiate JS callback. Only after the beforeload event, continue.
-    if (_waitForBeforeload && isTopLevelNavigation) {
-        CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
-                                                      messageAsDictionary:@{@"type":@"beforeload", @"url":[url absoluteString]}];
-        [pluginResult setKeepCallback:[NSNumber numberWithBool:YES]];
-
-        [self.commandDelegate sendPluginResult:pluginResult callbackId:self.callbackId];
-        return NO;
-    }
-
     //if is an app store link, let the system handle it, otherwise it fails to load it
-    if ([[ url scheme] isEqualToString:@"itms-appss"] || [[ url scheme] isEqualToString:@"itms-apps"]) {
+    else if ([[ url scheme] isEqualToString:@"itms-appss"] || [[ url scheme] isEqualToString:@"itms-apps"]) {
         [theWebView stopLoading];
         [self openInSystem:url];
-        shouldStart = NO;
+        return NO;
     }
     else if ((self.callbackId != nil) && isTopLevelNavigation) {
         // Send a loadstart event for each top-level navigation (includes redirects).
@@ -494,11 +453,7 @@
         [self.commandDelegate sendPluginResult:pluginResult callbackId:self.callbackId];
     }
 
-    if (_useBeforeload && isTopLevelNavigation) {
-        _waitForBeforeload = YES;
-    }
-
-    return shouldStart;
+    return YES;
 }
 
 - (void)webViewDidStartLoad:(UIWebView*)theWebView
@@ -585,13 +540,45 @@
    self.webView.delegate = nil;
 }
 
+-(UIImage*) drawText:(NSString*) text
+             inImage:(UIImage*)  image
+             atPoint:(CGPoint)   point
+{
+    
+    //UIFont *font = [UIFont boldSystemFontOfSize:12];
+    UIFont *font = [UIFont fontWithName:@"ionicons" size:28.0];
+    CGRect frame = CGRectMake(0,0, 30, 30);
+    frame.size = CGSizeMake(30, 30);
+    UIGraphicsBeginImageContext(frame.size);
+    [image drawInRect:CGRectMake(0,0,30, 30)];
+    CGRect rect = CGRectMake(point.x, point.y, 30, 30);
+    [[UIColor whiteColor] set];
+    [text drawInRect:CGRectIntegral(rect) withFont:font];
+    UIImage *newImage = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    
+    return newImage;
+}
+
 - (void)createViews
 {
+
+
     // We create the views in code for primarily for ease of upgrades and not requiring an external .xib to be included
 
     CGRect webViewBounds = self.view.bounds;
     BOOL toolbarIsAtBottom = ![_browserOptions.toolbarposition isEqualToString:kInAppBrowserToolbarBarPositionTop];
-    webViewBounds.size.height -= _browserOptions.location ? FOOTER_HEIGHT : TOOLBAR_HEIGHT;
+    if (_browserOptions.custom != nil){
+        _browserOptions.location = nil;
+        webViewBounds.size.height -=(TOOLBAR_HEIGHT+5);
+    }else{
+        webViewBounds.size.height -= _browserOptions.location ? FOOTER_HEIGHT : TOOLBAR_HEIGHT;
+    }
+    
+
+    webViewBounds.origin.y = HEADER_HEIGHT;
+    webViewBounds.size.height -=HEADER_HEIGHT;
+
     self.webView = [[UIWebView alloc] initWithFrame:webViewBounds];
 
     self.webView.autoresizingMask = (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight);
@@ -710,10 +697,137 @@
       [self.toolbar setItems:@[self.closeButton, flexibleSpaceButton, self.backButton, fixedSpaceButton, self.forwardButton]];
     }
 
+
+    // header
+    CGRect headerFrame = CGRectMake(0.0, 0.0, self.view.bounds.size.width, HEADER_HEIGHT);
+    
+    self.header = [[UIToolbar alloc] initWithFrame:headerFrame];
+    self.header.autoresizesSubviews = YES;
+    self.header.autoresizingMask = toolbarIsAtBottom ? (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin) : UIViewAutoresizingFlexibleWidth;
+    self.header.clearsContextBeforeDrawing = NO;
+    self.header.clipsToBounds = NO;
+    self.header.contentMode = UIViewContentModeScaleToFill;
+    self.header.hidden = NO;
+    self.header.multipleTouchEnabled = NO;
+    self.header.opaque = NO;
+    self.header.userInteractionEnabled = YES;
+    self.header.barTintColor = [UIColor whiteColor];
+    //self.header.barTintColor = [self colorFromHexString:@"#fff"];
+    self.header.translucent = NO;
+    self.header.barStyle = UIBarStyleDefault;
+    // Add a bottomBorder.
+    CALayer *bottomBorder = [CALayer layer];
+    bottomBorder.frame = CGRectMake(0.0f, HEADER_HEIGHT, self.header.frame.size.width, 1.0f);
+    bottomBorder.backgroundColor = [UIColor colorWithWhite:0.8f
+                                                     alpha:1.0f].CGColor;
+    [self.header.layer addSublayer:bottomBorder];
+    // btns
+    UIBarButtonItem *buttonBack = [[UIBarButtonItem alloc] initWithTitle:@"\uf3cf" style:UIBarButtonItemStylePlain target:self action:@selector(close)];
+    [buttonBack setTitleTextAttributes:[NSDictionary dictionaryWithObjectsAndKeys:
+                                        [UIFont fontWithName:@"ionicons" size:28.0], NSFontAttributeName,
+                                        [UIColor blackColor], NSForegroundColorAttributeName,
+                                        nil]
+                              forState:UIControlStateNormal];
+    UIBarButtonItem *buttoncenter = [[UIBarButtonItem alloc] initWithTitle:@"コラム" style:UIBarButtonItemStylePlain target:self action:nil];
+    buttoncenter.tintColor = [UIColor blackColor];
+    [buttoncenter setTitleTextAttributes:[NSDictionary dictionaryWithObjectsAndKeys:
+                                        [UIFont fontWithName:@"Helvetica-Bold" size:19.0], NSFontAttributeName,
+                                        [UIColor blackColor], NSForegroundColorAttributeName,
+                                        nil]
+                              forState:UIControlStateNormal];
+    
+    UIBarButtonItem *flexibaleSpaceBarButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+
+    
+    NSArray *buttons = [NSArray arrayWithObjects: buttonBack, flexibaleSpaceBarButton,  buttoncenter, flexibaleSpaceBarButton, nil];
+    [self.header setItems: buttons animated:NO];
+
     self.view.backgroundColor = [UIColor grayColor];
-    [self.view addSubview:self.toolbar];
-    [self.view addSubview:self.addressLabel];
+    //self.view.backgroundColor = [UIColor whiteColor];
+    if (_browserOptions.custom != nil)
+    {
+        // header
+        [self.view addSubview:self.header];
+        // tab bar bottom
+        CGRect tabBarFrame = CGRectMake(0.0, toolbarY-5, self.view.bounds.size.width, TOOLBAR_HEIGHT+5);
+        self.tabBar = [[UITabBar alloc] initWithFrame:tabBarFrame];
+        self.tabBar.alpha = 1.000;
+        self.tabBar.autoresizesSubviews = YES;
+        self.tabBar.autoresizingMask = toolbarIsAtBottom ? (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin) : UIViewAutoresizingFlexibleWidth;
+        self.tabBar.barStyle = UIBarStyleBlackOpaque;
+        self.tabBar.clearsContextBeforeDrawing = NO;
+        self.tabBar.clipsToBounds = NO;
+        self.tabBar.contentMode = UIViewContentModeScaleToFill;
+        self.tabBar.hidden = NO;
+        self.tabBar.multipleTouchEnabled = NO;
+        self.tabBar.opaque = NO;
+        self.tabBar.userInteractionEnabled = YES;
+        if (_browserOptions.toolbarcolor != nil || YES) { // Set toolbar color if user sets it in options
+            self.tabBar.barTintColor = [self colorFromHexString:@"#00122E"];
+        }
+        if (!_browserOptions.toolbartranslucent || YES) { // Set toolbar translucent to no if user sets it in options
+            self.tabBar.translucent = NO;
+        }
+        // tab items
+        NSMutableArray *tabBarItems = [[NSMutableArray alloc] init];
+        UITabBarItem *tabBarItem1 =  [[UITabBarItem alloc] init];
+        [tabBarItem1 setTitle:@"検索する"];
+        UIImage *img = [[UIImage alloc] init];
+        UIImage *img1 = [self drawText:@"\uf345"
+                               inImage:img
+                               atPoint:CGPointMake(0, 0)];
+        [tabBarItem1 setImage: img1];
+        [tabBarItem1 setTag:0];
+        UITabBarItem *tabBarItem2 = [[UITabBarItem alloc] init];
+        [tabBarItem2 setImage:[self drawText:@"\uf345"
+                                     inImage:[[UIImage alloc] init]
+                                     atPoint:CGPointMake(0, 0)]];
+        [tabBarItem2 setTitle:@"予約履歴"];
+        [tabBarItem2 setTag:1];
+        UITabBarItem *tabBarItem3 = [[UITabBarItem alloc] init];
+        [tabBarItem3 setImage:[self drawText:@"\uf2bd"
+                                     inImage:[[UIImage alloc] init]
+                                     atPoint:CGPointMake(0, 0)]];
+        [tabBarItem3 setTitle:@"マイカルテ"];
+        [tabBarItem3 setTag:2];
+        UITabBarItem *tabBarItem4 = [[UITabBarItem alloc] init];
+        [tabBarItem4 setTag:3];
+        [tabBarItem4 setImage:[self drawText:@"\uf32a"
+                                     inImage:[[UIImage alloc] init]
+                                     atPoint:CGPointMake(0, 0)]];
+        [tabBarItem4 setTitle:@"メニュー"];
+        
+        
+        [tabBarItems addObject:tabBarItem1];
+        [tabBarItems addObject:tabBarItem2];
+        [tabBarItems addObject:tabBarItem3];
+        [tabBarItems addObject:tabBarItem4];
+        
+        self.tabBar.items = tabBarItems;
+        [self.tabBar setSelectedImageTintColor:[UIColor whiteColor]];
+        [self.tabBar setDelegate:self];
+        self.tabBar.selectedItem = [tabBarItems objectAtIndex:3];
+        
+        [self.view addSubview:self.tabBar];
+    }
+    else{
+        [self.view addSubview:self.toolbar];
+        [self.view addSubview:self.addressLabel];
+    }
+   
     [self.view addSubview:self.spinner];
+
+    
+
+}
+- (void)tabBar:(UITabBar *)tabBar didSelectItem:(UITabBarItem *)item{
+    NSString* url = [self.navigationDelegate.inAppBrowserViewController.currentURL absoluteString];
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
+                                                  messageAsDictionary:@{@"type":@"customscheme", @"url":url, @"index": [NSString stringWithFormat:@"%ld",item.tag] }];
+    [pluginResult setKeepCallback:[NSNumber numberWithBool:YES]];
+    
+    [self.navigationDelegate.commandDelegate sendPluginResult:pluginResult callbackId:self.navigationDelegate.callbackId];
+    [self close];
 }
 
 - (void) setWebViewFrame : (CGRect) frame {
@@ -884,13 +998,9 @@
     // Run later to avoid the "took a long time" log message.
     dispatch_async(dispatch_get_main_queue(), ^{
         if ([weakSelf respondsToSelector:@selector(presentingViewController)]) {
-            [[weakSelf presentingViewController] dismissViewControllerAnimated:YES completion:^{
-                [[[[UIApplication sharedApplication] delegate] window] makeKeyAndVisible];
-            }];
+            [[weakSelf presentingViewController] dismissViewControllerAnimated:YES completion:nil];
         } else {
-            [[weakSelf parentViewController] dismissViewControllerAnimated:YES completion:^{
-                [[[[UIApplication sharedApplication] delegate] window] makeKeyAndVisible];
-            }];
+            [[weakSelf parentViewController] dismissViewControllerAnimated:YES completion:nil];
         }
     });
 }
@@ -1146,6 +1256,7 @@
 
     UIToolbar* bgToolbar = [[UIToolbar alloc] initWithFrame:statusBarFrame];
     bgToolbar.barStyle = UIBarStyleDefault;
+    
     [bgToolbar setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
     [self.view addSubview:bgToolbar];
 
