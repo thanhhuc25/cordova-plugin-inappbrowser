@@ -19,12 +19,8 @@
 package org.apache.cordova.inappbrowser;
 
 import android.annotation.SuppressLint;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
-import android.os.Parcelable;
 import android.provider.Browser;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
@@ -75,7 +71,6 @@ import org.json.JSONObject;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.HashMap;
@@ -110,7 +105,6 @@ public class InAppBrowser extends CordovaPlugin {
     private static final String HIDE_URL = "hideurlbar";
     private static final String FOOTER = "footer";
     private static final String FOOTER_COLOR = "footercolor";
-    private static final String BEFORELOAD = "beforeload";
 
     private static final List customizableOptions = Arrays.asList(CLOSE_BUTTON_CAPTION, TOOLBAR_COLOR, NAVIGATION_COLOR, CLOSE_BUTTON_COLOR, FOOTER_COLOR);
 
@@ -139,7 +133,6 @@ public class InAppBrowser extends CordovaPlugin {
     private boolean hideUrlBar = false;
     private boolean showFooter = false;
     private String footerColor = "";
-    private boolean useBeforeload = false;
     private String[] allowedSchemes;
 
     /**
@@ -247,20 +240,6 @@ public class InAppBrowser extends CordovaPlugin {
         }
         else if (action.equals("close")) {
             closeDialog();
-        }
-        else if (action.equals("loadAfterBeforeload")) {
-            if (!useBeforeload) {
-              LOG.e(LOG_TAG, "unexpected loadAfterBeforeload called without feature beforeload=yes");
-            }
-            final String url = args.getString(0);
-            this.cordova.getActivity().runOnUiThread(new Runnable() {
-                @SuppressLint("NewApi")
-                @Override
-                public void run() {
-                    ((InAppBrowserClient)inAppWebView.getWebViewClient()).waitForBeforeload = false;
-                    inAppWebView.loadUrl(url);
-                }
-            });
         }
         else if (action.equals("injectScriptCode")) {
             String jsWrapper = null;
@@ -453,53 +432,12 @@ public class InAppBrowser extends CordovaPlugin {
                 intent.setData(uri);
             }
             intent.putExtra(Browser.EXTRA_APPLICATION_ID, cordova.getActivity().getPackageName());
-            // CB-10795: Avoid circular loops by preventing it from opening in the current app
-            this.openExternalExcludeCurrentApp(intent);
+            this.cordova.getActivity().startActivity(intent);
             return "";
             // not catching FileUriExposedException explicitly because buildtools<24 doesn't know about it
         } catch (java.lang.RuntimeException e) {
             LOG.d(LOG_TAG, "InAppBrowser: Error loading url "+url+":"+ e.toString());
             return e.toString();
-        }
-    }
-
-    /**
-     * Opens the intent, providing a chooser that excludes the current app to avoid
-     * circular loops.
-     */
-    private void openExternalExcludeCurrentApp(Intent intent) {
-        String currentPackage = cordova.getActivity().getPackageName();
-        boolean hasCurrentPackage = false;
-
-        PackageManager pm = cordova.getActivity().getPackageManager();
-        List<ResolveInfo> activities = pm.queryIntentActivities(intent, 0);
-        ArrayList<Intent> targetIntents = new ArrayList<Intent>();
-
-        for (ResolveInfo ri : activities) {
-            if (!currentPackage.equals(ri.activityInfo.packageName)) {
-                Intent targetIntent = (Intent)intent.clone();
-                targetIntent.setPackage(ri.activityInfo.packageName);
-                targetIntents.add(targetIntent);
-            }
-            else {
-                hasCurrentPackage = true;
-            }
-        }
-
-        // If the current app package isn't a target for this URL, then use
-        // the normal launch behavior
-        if (hasCurrentPackage == false || targetIntents.size() == 0) {
-            this.cordova.getActivity().startActivity(intent);
-        }
-        // If there's only one possible intent, launch it directly
-        else if (targetIntents.size() == 1) {
-            this.cordova.getActivity().startActivity(targetIntents.get(0));
-        }
-        // Otherwise, show a custom chooser without the current app listed
-        else if (targetIntents.size() > 0) {
-            Intent chooser = Intent.createChooser(targetIntents.remove(targetIntents.size()-1), null);
-            chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, targetIntents.toArray(new Parcelable[] {}));
-            this.cordova.getActivity().startActivity(chooser);
         }
     }
 
@@ -689,10 +627,6 @@ public class InAppBrowser extends CordovaPlugin {
             String footerColorSet = features.get(FOOTER_COLOR);
             if (footerColorSet != null) {
                 footerColor = footerColorSet;
-            }
-            String beforeload = features.get(BEFORELOAD);
-            if (beforeload != null) {
-                useBeforeload = beforeload.equals("yes") ? true : false;
             }
         }
 
@@ -944,7 +878,7 @@ public class InAppBrowser extends CordovaPlugin {
                     }
 
                 });
-                WebViewClient client = new InAppBrowserClient(thatWebView, edittext, useBeforeload);
+                WebViewClient client = new InAppBrowserClient(thatWebView, edittext);
                 inAppWebView.setWebViewClient(client);
                 WebSettings settings = inAppWebView.getSettings();
                 settings.setJavaScriptEnabled(true);
@@ -1105,8 +1039,6 @@ public class InAppBrowser extends CordovaPlugin {
     public class InAppBrowserClient extends WebViewClient {
         EditText edittext;
         CordovaWebView webView;
-        boolean useBeforeload;
-        boolean waitForBeforeload;
 
         /**
          * Constructor.
@@ -1114,11 +1046,9 @@ public class InAppBrowser extends CordovaPlugin {
          * @param webView
          * @param mEditText
          */
-        public InAppBrowserClient(CordovaWebView webView, EditText mEditText, boolean useBeforeload) {
+        public InAppBrowserClient(CordovaWebView webView, EditText mEditText) {
             this.webView = webView;
             this.edittext = mEditText;
-            this.useBeforeload = useBeforeload;
-            this.waitForBeforeload = useBeforeload;
         }
 
         /**
@@ -1131,27 +1061,12 @@ public class InAppBrowser extends CordovaPlugin {
          */
         @Override
         public boolean shouldOverrideUrlLoading(WebView webView, String url) {
-            boolean override = false;
-
-            // On first URL change, initiate JS callback. Only after the beforeload event, continue.
-            if (this.waitForBeforeload) {
-                try {
-                    JSONObject obj = new JSONObject();
-                    obj.put("type", "beforeload");
-                    obj.put("url", url);
-                    sendUpdate(obj, true);
-                    return true;
-                } catch (JSONException ex) {
-                    LOG.e(LOG_TAG, "URI passed in has caused a JSON error.");
-                }
-            }
-
             if (url.startsWith(WebView.SCHEME_TEL)) {
                 try {
                     Intent intent = new Intent(Intent.ACTION_DIAL);
                     intent.setData(Uri.parse(url));
                     cordova.getActivity().startActivity(intent);
-                    override = true;
+                    return true;
                 } catch (android.content.ActivityNotFoundException e) {
                     LOG.e(LOG_TAG, "Error dialing " + url + ": " + e.toString());
                 }
@@ -1160,7 +1075,7 @@ public class InAppBrowser extends CordovaPlugin {
                     Intent intent = new Intent(Intent.ACTION_VIEW);
                     intent.setData(Uri.parse(url));
                     cordova.getActivity().startActivity(intent);
-                    override = true;
+                    return true;
                 } catch (android.content.ActivityNotFoundException e) {
                     LOG.e(LOG_TAG, "Error with " + url + ": " + e.toString());
                 }
@@ -1191,18 +1106,16 @@ public class InAppBrowser extends CordovaPlugin {
                     intent.putExtra("address", address);
                     intent.setType("vnd.android-dir/mms-sms");
                     cordova.getActivity().startActivity(intent);
-                    override = true;
+                    return true;
                 } catch (android.content.ActivityNotFoundException e) {
                     LOG.e(LOG_TAG, "Error sending sms " + url + ":" + e.toString());
                 }
             }
             // Test for whitelisted custom scheme names like mycoolapp:// or twitteroauthresponse:// (Twitter Oauth Response)
-            else if (!url.startsWith("http:") && !url.startsWith("https:") && url.matches("^[A-Za-z0-9+.-]*://.*?$")) {
+            else if (!url.startsWith("http:") && !url.startsWith("https:") && url.matches("^[a-z]*://.*?$")) {
                 if (allowedSchemes == null) {
-                    String allowed = preferences.getString("AllowedSchemes", null);
-                    if(allowed != null) {
-                        allowedSchemes = allowed.split(",");
-                    }
+                    String allowed = preferences.getString("AllowedSchemes", "");
+                    allowedSchemes = allowed.split(",");
                 }
                 if (allowedSchemes != null) {
                     for (String scheme : allowedSchemes) {
@@ -1212,7 +1125,7 @@ public class InAppBrowser extends CordovaPlugin {
                                 obj.put("type", "customscheme");
                                 obj.put("url", url);
                                 sendUpdate(obj, true);
-                                override = true;
+                                return true;
                             } catch (JSONException ex) {
                                 LOG.e(LOG_TAG, "Custom Scheme URI passed in has caused a JSON error.");
                             }
@@ -1221,10 +1134,7 @@ public class InAppBrowser extends CordovaPlugin {
                 }
             }
 
-            if (this.useBeforeload) {
-                this.waitForBeforeload = true;
-            }
-            return override;
+            return false;
         }
 
 

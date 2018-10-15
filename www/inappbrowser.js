@@ -33,7 +33,6 @@
 
     function InAppBrowser () {
         this.channels = {
-            'beforeload': channel.create('beforeload'),
             'loadstart': channel.create('loadstart'),
             'loadstop': channel.create('loadstop'),
             'loaderror': channel.create('loaderror'),
@@ -45,16 +44,8 @@
     InAppBrowser.prototype = {
         _eventHandler: function (event) {
             if (event && (event.type in this.channels)) {
-                if (event.type === 'beforeload') {
-                    this.channels[event.type].fire(event, this._loadAfterBeforeload);
-                } else {
-                    this.channels[event.type].fire(event);
-                }
+                this.channels[event.type].fire(event);
             }
-        },
-        _loadAfterBeforeload: function (strUrl) {
-            strUrl = urlutil.makeAbsolute(strUrl);
-            exec(null, null, 'InAppBrowser', 'loadAfterBeforeload', [strUrl]);
         },
         close: function (eventname) {
             exec(null, null, 'InAppBrowser', 'close', []);
